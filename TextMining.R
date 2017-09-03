@@ -62,16 +62,8 @@ ggplot(cb, aes(Quran, Bible)) +
 dev.off()
 
 
-
 #===================================================================================================
-#Cleaning
-corpus <- tm_map(corpus, tolower)
-corpus <- tm_map(corpus, removeNumbers)
-corpus <- tm_map(corpus, removePunctuation)
-corpus <- tm_map(corpus, removeWords, stopwords("english"))
-corpus <- tm_map(corpus, removeWords, STOP_WORDS) # Remove my own stopwords list
-corpus <- tm_map(corpus, stemDocument)
-corpus <- tm_map(corpus, stripWhitespace)
+
 
 #Remove special characters
 removeSpecChar <- function(x) gsub("[^[:alnum:]///' ]|*\\{.*?\\} *", " ", x)
@@ -83,17 +75,6 @@ corpus <- tm_map(corpus, PlainTextDocument)
 #Create a term document matrix, remove words with fewer than 3 characters
 tdm1 <- TermDocumentMatrix(corpus, control=list(wordLengths=c(3,Inf)))
 
-#Create document term matrix, remove words with fewer than 3 characters
-#dtm1 <- DocumentTermMatrix(corpus, control=list(wordLengths=c(3,Inf)))
-
-#organize by frequency
-#dtmsort <- sort(colSums(as.matrix(dtm1)), decreasing=TRUE)
-#most frequent
-#head(dtmsort)
-#least frequent
-#tail(dtmsort)
-#the twenty most frequent words:
-#dtmsort[1:20]
 
 # Obtain the most frequent words
 freq.terms <- findFreqTerms(tdm1, lowfreq=1500)
@@ -104,9 +85,6 @@ df1 <- data.frame(term=names(term.freq),freq=term.freq)
 #Create plot of top frequent words 
 ggplot(df1, aes(x=term,y=freq)) + geom_bar(stat="identity") + xlab("Terms") + ylab("Count") + coord_flip() + theme(axis.text=element_text(size=14),axis.title=element_text(size=14,face="bold"))
 
-barplot(df1[1:30,]$freq, las = 2, names.arg = df1[1:30,]$term, horiz= TRUE,
-        col ="lightblue", main ="Most frequent words",
-        xlab = "Word frequencies")  
 
 #word cloud
 m1 <- as.matrix(tdm1)
@@ -114,11 +92,4 @@ word.freq <- sort(rowSums(m1), decreasing=T)
 wordcloud(words=names(word.freq), freq=word.freq, min.freq=100,random.order=F, scale=c(10, .1),
           colors=brewer.pal(8, "Dark2"))
 
-wordcloud(words=names(word.freq), freq=word.freq, min.freq = 150,
-          max.words=200, random.order=FALSE, 
-          colors=brewer.pal(8, "Dark2"))
 
-#Remove zero rows
-#dtm1 <- dtm1[apply(dtm1[,-1], 1, function(x) !all(x==0)),]
-#lda <- LDA(dtm1, k=5) #find 5 topics
-#(term <- terms(lda, 8)) #first 8 terms of every topic
