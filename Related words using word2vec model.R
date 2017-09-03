@@ -9,19 +9,16 @@ ts1 <- fread("World English Bible-No TR.csv", select=c("Text"))
 #ts1 <- fread("Quran-maududi.csv", select=c("Text"))
 
 
-print("Some verses cleanup")
-# It is important to remove "\n" -- it appears to cause a parsing error when converting to an H2OFrame
-#ts1[,":="(Text=gsub("'|\"|'|???|???|\"|\n|,|\\.|???|\\?|\\+|\\-|\\/|\\=|\\(|\\)|???", "", Text))]
-#Remove !" # $ % & ' ( ) * + , - . / : ; < = > ? @ [ \ ] ^ _ ` { | } ~
+# Remove !" # $ % & ' ( ) * + , - . / : ; < = > ? @ [ \ ] ^ _ ` { | } ~
 ts1[,":="(Text=gsub("[[:punct:]]", " ", Text))]
 
+ts1[,":="(Text=gsub("\n", "", Text1))]
+
+# Remove extra whitspaces
 ts1[,":="(Text=gsub("  ", " ", Text))]
 
 
-
-#ts1[,":="(Text1=gsub("[][!#$%()*,.:;<=>@^_`|~.{}]", "", Text1), Text2=gsub("[][!#$%()*,.:;<=>@^_`|~.{}]", "", Text2))] 
-
-print("get list of unique verses")
+# Get list of unique verses
 texts <- as.data.table(ts1)
 texts <- unique(texts)
 texts.hex <- as.h2o(texts, destination_frame = "texts.hex", col.types=c("String"))
@@ -41,6 +38,8 @@ STOP_WORDS = c("us","i","into","them","such","their","then","these","him","were"
                "whats","whens","whos","wont","would","wouldnt","upon","shall","also")
 
 
+# Tokenization
+# ===================================================================================================== #
 tokenize <- function(sentences, stop.words = STOP_WORDS)
 {
   tokenized <- h2o.tokenize(sentences, "\\\\W+")
@@ -57,45 +56,24 @@ tokenize <- function(sentences, stop.words = STOP_WORDS)
   tokenized.words[is.na(tokenized.words) || (! tokenized.words %in% STOP_WORDS),]
 }
 
-print("Break verses into sequence of words")
+# Break verses into sequence of words
 words <- tokenize(texts.hex$Text)
 
 
-print("Build word2vec model")
-
+# Build word2vec model
 w2v.model <- h2o.word2vec(words
                           , model_id = "w2v_model"
-                          , vec_size = 100
+                          , vec_size = 100 # The dimensionality of vector representation 
                           , min_word_freq = 5
                           , window_size = 5
                           , init_learning_rate = 0.025
                           , sent_sample_rate = 0
-                          , epochs = 20) 
+                          , epochs = 20) # The number of training iterations to run
 
-
-
-#the number of training iterations to run, only one epoch to save time
 
 h2o.rm('texts.hex') # Remove the h2o Big Data object to empty memory, no longer needed
 
-print("Find most related word:")
+#Find most related words
 h2o.findSynonyms(w2v.model, "lord", count = 5)
 
-
-#======================================================================================
-#Heatmap drawing
-#======================================================================================
-
-library(ggplot2)
-library(plyr)
-library(arm)
-library(reshape2)
-nba <- fread("heat.csv")
-nba$V1 <- with(nba, reorder(Term, PTS))
-nba.m <- melt(nba)
-nba.m <- ddply(nba.m, .(variable), transform,
-               rescale = value)
-(p <- ggplot(nba.m, aes(variable, Term)) + geom_tile(aes(fill = rescale),
-                                                     colour = "white") + scale_fill_gradient(low = "white",
-                                                                                             high = "steelblue")+geom_text(aes(label=round(rescale,2))))
 
