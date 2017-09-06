@@ -1,4 +1,4 @@
-# Import all required datasets
+# Import all required libraries
 library(data.table)
 library(h2o)
 library(ROCR)
