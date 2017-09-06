@@ -1,3 +1,4 @@
+# Import all required libraries
 library(tm) #for text mining
 library(SnowballC) #for stemmer
 library(ggplot2) #for visualization
