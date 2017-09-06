@@ -1,4 +1,4 @@
-
+# Import all required datasets
 library(data.table)
 library(h2o)
 library(ROCR)
@@ -193,6 +193,7 @@ perf <- performance(pred, measure = "auc")
 print(paste('AUC: ',perf@y.values))
 
 
+
 # ====================================================================================================== #
 
 # Prediction on test data
@@ -330,145 +331,3 @@ print(paste('AUC: ',perf@y.values))
 
 
 
-# ====================================================================================================== #
-# Prediction on test data
-
-# ====================================================================================================== #
-
-# Importing test data
-ts2 <- fread("QBTest.csv", select=c("id","Q.Text","B.Text","class"))
-
-#tsh2 <- h2o.importFile("QBTest.csv")
-
-print("Some verses cleanup")
-# It is important to remove "\n" -- it appears to cause a parsing error when converting to an H2OFrame
-ts2[,":="(Q.Text=gsub("'|\"|'|???|???|\"|\n|,|\\.|???|\\?|\\+|\\-|\\/|\\=|\\(|\\)|???", "", Q.Text),
-          B.Text=gsub("'|\"|'|???|???|\"|\n|,|\\.|???|\\?|\\+|\\-|\\/|\\=|\\(|\\)|???", "", B.Text))]
-ts2[,":="(Q.Text=gsub("  ", " ", Q.Text),
-          B.Text=gsub("  ", " ", B.Text))]
-
-#Remove !" # $ % & ' ( ) * + , - . / : ; < = > ? @ [ \ ] ^ _ ` { | } ~
-ts2[,":="(Q.Text=gsub("[[:punct:]]", "", Q.Text),
-          B.Text=gsub("[[:punct:]]", "", B.Text))]
-
-#Words: (Lord,allah,Yahweh) all grouped as God
-ts2[,":="(Q.Text=gsub("allah|lord|lords|gods|yahweh", "god", Q.Text, ignore.case = TRUE),
-         B.Text=gsub("allah|lord|lords|gods|yahweh", "god", B.Text, ignore.case = TRUE))]
-#Words: (Satan,devil,evil,jinn,demon) all grouped as Evil
-ts2[,":="(Q.Text=gsub("satan|satans|devil|devils|evils|jinn|demon|demons", "evil", Q.Text, ignore.case = TRUE),
-          B.Text=gsub("satan|satans|devil|devils|evils|jinn|demon|demons", "evil", B.Text, ignore.case = TRUE))]
-#Words: (Surah) converted to Verses
-ts2[,":="(Q.Text=gsub("surah", "verses", Q.Text, ignore.case = TRUE),
-         B.Text=gsub("surah", "verses", B.Text, ignore.case = TRUE))]
-#Words: (zakah,zakat) converted to charity
-ts2[,":="(Q.Text=gsub("zakah|zakat", "charity", Q.Text, ignore.case = TRUE),
-         B.Text=gsub("zakah|zakat", "charity", B.Text, ignore.case = TRUE))]
-#Words: (salat) converted to prayer
-ts2[,":="(Q.Text=gsub("salat", "prayer", Q.Text, ignore.case = TRUE),
-         B.Text=gsub("salat", "prayer", B.Text, ignore.case = TRUE))]
-
-
-print("get list of unique verses")
-texts.test <- as.data.table(rbind(ts2[,.(verse=Q.Text)], ts2[,.(verse=B.Text)]))
-texts.test <- unique(texts.test)
-texts.test.hex <- as.h2o(texts.test, destination_frame = "texts.test.hex", col.types=c("String"))
-
-print("Break verses into sequence of words")
-words.test <- tokenize(texts.test.hex$verse)
-
-print("Build word2vec model")
-
-w2v.test.model <- h2o.word2vec(words.test
-                               , model_id = "w2v_model"
-                               , vec_size = vectors
-                               , min_word_freq = 5
-                               , window_size = 5
-                               , init_learning_rate = 0.025
-                               , sent_sample_rate = 0
-                               , epochs = e) #the number of training iterations to run, only one epoch to save time
-
-h2o.rm('texts.test.hex') # Remove the h2o Big Data object to empty memory, no longer needed
-
-print("Sanity check - find synonyms for the word ' '")
-print(h2o.findSynonyms(w2v.test.model, "god", count = 5))
-
-print("Get vectors for each verse")
-text_all.test.vecs <- h2o.transform(w2v.test.model, words.test, aggregate_method = "AVERAGE")
-
-print("Convert to data.table & merge results")
-text_all.test.vecs <- as.data.table(text_all.test.vecs)
-texts_all_test <- cbind(texts.test, text_all.test.vecs)
-ts2 <- merge(ts2, texts_all_test, by.x="B.Text", by.y="verse", all.x=TRUE, sort=FALSE)
-ts2 <- merge(ts2, texts_all_test, by.x="Q.Text", by.y="verse", all.x=TRUE, sort=FALSE)
-colnames(ts2)[5:ncol(ts2)] <- c(paste0("t1_vec_C", 1:vectors), paste0("t2_vec_C", 1:vectors))
-ts2 <- na.omit(ts2)
-
-h2o_test_data <- as.h2o(ts2)
-h2o_test_data <- h2o.na_omit(h2o_test_data) # Important since GBM does not support NA values
-
-predicted.results <- h2o.predict(gbm.model, newdata=h2o_test_data[,5:104])
-predicted.results <- as.data.frame(predicted.results)
-predicted.results <- ifelse(predicted.results > threshold,1,0)
-ts2<- cbind(ts2, predicted.results)
-colnames(ts2)[105] <- c("predection")
-
-#print("output question vectors and prediction for test data")
-#fwrite(ts2, "./QBTest_Result.csv")
-
-
-#check accuracy
-#------------------------------------------------------------------
-
-
-# Accuracy of predection:
-pred <- prediction(predicted.results, as.data.frame(h2o_test_data$class))
-tp <- as.numeric(unlist(pred@tp)) #true positive
-fp <- as.numeric(unlist(pred@fp)) #false positive
-fn <- as.numeric(unlist(pred@fn)) #false negative
-f1 <- (2*tp)/(2*tp+fp+fn) #F1-score
-
-# Obtain the threshold for predicted response values based on optimum (maximum) F1-score
-#threshold <- cutoffs[which.max(f1)]
-
-# If predicted values > threshold, set it to 1, else: set it to 0
-#predicted.results <- ifelse(predicted.results > threshold,1,0)
-
-# Compare predictions with labels 
-misClasificError <- mean(predicted.results != as.data.frame(h2o_test_data$class))
-
-# Show accuracy
-print(paste('GBM Training Accuracy',1-misClasificError))
-
-# Precision
-precision <- tp[which.max(f1)]/(tp[which.max(f1)]+fp[which.max(f1)])
-print(paste('GBM Precision',precision))
-
-# Recall
-recall <- tp[which.max(f1)]/(tp[which.max(f1)]+fn[which.max(f1)])
-print(paste('GBM Recall',recall))
-
-# F1 score
-print(paste('GBM F1 score',f1[which.max(f1)]))
-
-# Precision - Recall Curve or ROC curve
-roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
-plot(roc.perf)
-abline(a=0, b= 1, lty = 2)
-
-perf <- performance(pred, measure = "auc")
-print(paste('AUC: ',perf@y.values))
-
-
-#-----------PACKAGES--------------------
-
-#if ("package:data.table" %in% search()) { detach("package:data.table", unload=TRUE) }
-#if ("data.table" %in% rownames(installed.packages())) { remove.packages("data.table") }
-
-#if ("package:h2o" %in% search()) { detach("package:h2o", unload=TRUE) }
-#if ("h2o" %in% rownames(installed.packages())) { remove.packages("h2o") }
-#install.packages("h2o", type="source", repos=(c("http://h2o-release.s3.amazonaws.com/h2o/latest_stable_R")))
-#install.packages("data.table")
-
-#h2o.init(ip = "localhost", port = 54321, startH2O = TRUE, max_mem_size="16G", nthreads = -1) 
-
-#h2o.startLogging() 
